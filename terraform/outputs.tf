@@ -28,3 +28,18 @@ output "lambda_role_arn" {
   value       = aws_iam_role.lambda_execution.arn
 }
 
+output "s3_stage_bucket_name" {
+  description = "Name of the S3 bucket used as Snowflake external stage"
+  value       = aws_s3_bucket.snowflake_stage.id
+}
+
+output "s3_stage_bucket_arn" {
+  description = "ARN of the S3 bucket used as Snowflake external stage"
+  value       = aws_s3_bucket.snowflake_stage.arn
+}
+
+output "snowflake_s3_role_arn" {
+  description = "ARN of the IAM role for Snowflake S3 access"
+  value       = length(aws_iam_role.snowflake_s3_access) > 0 ? aws_iam_role.snowflake_s3_access[0].arn : ""
+}
+

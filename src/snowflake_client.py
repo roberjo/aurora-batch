@@ -160,6 +160,7 @@ class SnowflakeClient:
                        truncate: bool = False) -> int:
         """
         Load data into Snowflake table using INSERT statements.
+        Note: For large batches, use load_from_s3() instead.
 
         Args:
             schema_name: Schema name
@@ -203,6 +204,132 @@ class SnowflakeClient:
 
         except Exception as e:
             logger.error(f"Failed to load data into Snowflake: {str(e)}")
+            raise
+
+    def load_from_s3(self, schema_name: str, table_name: str,
+                     s3_bucket: str, s3_key: str,
+                     storage_integration: Optional[str] = None,
+                     file_format: str = 'csv',
+                     truncate: bool = False,
+                     on_error: str = 'ABORT_STATEMENT') -> int:
+        """
+        Load data from S3 into Snowflake table using COPY INTO.
+
+        Args:
+            schema_name: Schema name
+            table_name: Table name
+            s3_bucket: S3 bucket name
+            s3_key: S3 key/path of file
+            storage_integration: Snowflake storage integration name (optional)
+            file_format: File format ('csv' or 'parquet')
+            truncate: Whether to truncate table before loading
+            on_error: Error handling ('ABORT_STATEMENT', 'SKIP_FILE', 'CONTINUE')
+
+        Returns:
+            Number of rows loaded
+        """
+        if not self.connection:
+            raise ValueError("Not connected to Snowflake. Call connect() first.")
+
+        try:
+            cursor = self.connection.cursor()
+
+            if truncate:
+                cursor.execute(f'TRUNCATE TABLE "{schema_name}"."{table_name}"')
+
+            # Build S3 path
+            s3_path = f"s3://{s3_bucket}/{s3_key}"
+
+            # Build COPY INTO command
+            if storage_integration:
+                copy_command = f'''
+                    COPY INTO "{schema_name}"."{table_name}"
+                    FROM '{s3_path}'
+                    STORAGE_INTEGRATION = {storage_integration}
+                    FILE_FORMAT = (TYPE = '{file_format.upper()}')
+                    ON_ERROR = '{on_error}'
+                '''
+            else:
+                # Use IAM role if storage integration not provided
+                # Try to get IAM role from connection params or environment
+                iam_role = self.connection_params.get('aws_iam_role')
+                if not iam_role:
+                    import os
+                    iam_role = os.getenv('SNOWFLAKE_AWS_IAM_ROLE')
+                
+                if not iam_role:
+                    raise ValueError(
+                        "Either storage_integration or aws_iam_role must be provided. "
+                        "Set SNOWFLAKE_AWS_IAM_ROLE environment variable or provide in connection params."
+                    )
+
+                copy_command = f'''
+                    COPY INTO "{schema_name}"."{table_name}"
+                    FROM '{s3_path}'
+                    CREDENTIALS = (AWS_IAM_ROLE = '{iam_role}')
+                    FILE_FORMAT = (TYPE = '{file_format.upper()}')
+                    ON_ERROR = '{on_error}'
+                '''
+
+            logger.info(f"Executing COPY INTO from S3: {s3_path}")
+            cursor.execute(copy_command)
+
+            # Get load result
+            result = cursor.fetchone()
+            rows_loaded = result[1] if result else 0  # Second column is usually rows_loaded
+
+            cursor.close()
+
+            logger.info(f"Loaded {rows_loaded} rows from S3 into {schema_name}.{table_name}")
+            return rows_loaded
+
+        except Exception as e:
+            logger.error(f"Failed to load data from S3 into Snowflake: {str(e)}")
+            raise
+
+    def create_external_stage(self, stage_name: str, s3_bucket: str, s3_prefix: str,
+                              storage_integration: Optional[str] = None) -> None:
+        """
+        Create an external stage in Snowflake pointing to S3.
+
+        Args:
+            stage_name: Name of the stage
+            s3_bucket: S3 bucket name
+            s3_prefix: S3 prefix/path
+            storage_integration: Snowflake storage integration name (optional)
+        """
+        if not self.connection:
+            raise ValueError("Not connected to Snowflake. Call connect() first.")
+
+        try:
+            cursor = self.connection.cursor()
+
+            s3_url = f"s3://{s3_bucket}/{s3_prefix.rstrip('/')}/"
+
+            if storage_integration:
+                create_stage = f'''
+                    CREATE STAGE IF NOT EXISTS {stage_name}
+                    URL = '{s3_url}'
+                    STORAGE_INTEGRATION = {storage_integration}
+                '''
+            else:
+                iam_role = self.connection_params.get('aws_iam_role')
+                if not iam_role:
+                    raise ValueError("Either storage_integration or aws_iam_role must be provided")
+
+                create_stage = f'''
+                    CREATE STAGE IF NOT EXISTS {stage_name}
+                    URL = '{s3_url}'
+                    CREDENTIALS = (AWS_IAM_ROLE = '{iam_role}')
+                '''
+
+            cursor.execute(create_stage)
+            cursor.close()
+
+            logger.info(f"Created external stage: {stage_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to create external stage: {str(e)}")
             raise
 
     def __enter__(self):

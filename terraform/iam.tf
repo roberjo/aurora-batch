@@ -70,3 +70,28 @@ resource "aws_iam_role_policy" "lambda_vault_access" {
   })
 }
 
+resource "aws_iam_role_policy" "lambda_s3_access" {
+  name = "${var.lambda_function_name}-s3-access"
+  role = aws_iam_role.lambda_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.snowflake_stage.arn,
+          "${aws_s3_bucket.snowflake_stage.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+

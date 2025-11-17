@@ -587,6 +587,7 @@ def read_wal_changes(connection):
 ## Examples
 
 See `examples/` directory for complete customization examples:
+
 - `examples/transformations/` - Custom transformation examples
 - `examples/monitoring/` - Custom monitoring examples
 - `examples/error_handling/` - Error handling examples

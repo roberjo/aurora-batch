@@ -23,6 +23,12 @@ resource "aws_lambda_function" "replication" {
       REPLICATION_MODE          = var.replication_mode
       INCREMENTAL_COLUMN        = var.incremental_column
       ENVIRONMENT               = var.environment
+      S3_STAGE_BUCKET           = aws_s3_bucket.snowflake_stage.id
+      S3_STAGE_PREFIX           = var.s3_stage_prefix
+      S3_FILE_FORMAT            = var.s3_file_format
+      SNOWFLAKE_STORAGE_INTEGRATION = var.snowflake_storage_integration
+      CLEANUP_S3_FILES         = var.cleanup_s3_files
+      S3_CLEANUP_MODE          = var.s3_cleanup_mode
     }
   }
 

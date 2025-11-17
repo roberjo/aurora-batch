@@ -115,3 +115,41 @@ variable "tags" {
   default     = {}
 }
 
+variable "s3_stage_prefix" {
+  description = "S3 prefix/path for staging files"
+  type        = string
+  default     = "staging"
+}
+
+variable "s3_file_format" {
+  description = "File format for S3 staging: 'csv' or 'parquet'"
+  type        = string
+  default     = "csv"
+  validation {
+    condition     = contains(["csv", "parquet"], var.s3_file_format)
+    error_message = "S3 file format must be 'csv' or 'parquet'."
+  }
+}
+
+variable "snowflake_storage_integration" {
+  description = "Snowflake storage integration name (optional, uses IAM role if not provided)"
+  type        = string
+  default     = ""
+}
+
+variable "cleanup_s3_files" {
+  description = "Whether to delete S3 files after successful load to Snowflake"
+  type        = string
+  default     = "true"
+}
+
+variable "s3_cleanup_mode" {
+  description = "S3 cleanup mode: 'after_all' (clean after all batches load), 'after_each' (clean after each file), 'never' (rely on lifecycle policy)"
+  type        = string
+  default     = "after_all"
+  validation {
+    condition     = contains(["after_all", "after_each", "never"], var.s3_cleanup_mode)
+    error_message = "S3 cleanup mode must be 'after_all', 'after_each', or 'never'."
+  }
+}
+

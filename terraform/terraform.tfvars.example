@@ -31,6 +31,25 @@ incremental_column  = "" # Only needed for incremental mode
 lambda_timeout   = 900  # 15 minutes
 lambda_memory_size = 512 # MB
 
+# S3 Staging Configuration
+s3_stage_prefix              = "staging"
+s3_file_format               = "csv"  # or "parquet"
+s3_stage_retention_days      = 7
+snowflake_storage_integration = ""  # Optional: Snowflake storage integration name
+cleanup_s3_files             = "true"  # Set to "true" to auto-delete S3 files after load
+s3_cleanup_mode              = "after_all"  # "after_all" (recommended), "after_each", or "never"
+snowflake_iam_user_arn       = ""  # Optional: For storage integration
+snowflake_external_id        = ""  # Optional: For storage integration
+
+# S3 Cleanup Lambda (Optional)
+enable_s3_cleanup_lambda     = false  # Enable separate Lambda for orphaned file cleanup
+s3_cleanup_schedule_expression = "cron(0 3 * * ? *)"  # Daily at 3 AM UTC
+s3_cleanup_orphaned_max_age_hours = 24  # Clean files older than 24 hours
+
+# S3 Monitoring
+s3_bucket_size_alarm_threshold_gb = 100  # Alert if bucket exceeds 100 GB
+s3_bucket_object_count_alarm_threshold = 10000  # Alert if bucket has more than 10K objects
+
 cloudwatch_alarm_sns_topic_arn = "" # Optional: SNS topic for alarms
 
 tags = {
@@ -38,4 +57,3 @@ tags = {
   Project     = "aurora-snowflake-replication"
   ManagedBy   = "terraform"
 }
-

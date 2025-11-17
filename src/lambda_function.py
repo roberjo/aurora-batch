@@ -8,6 +8,7 @@ from typing import Any, Dict
 try:
     from aurora_client import AuroraClient
     from replication import ReplicationEngine
+    from s3_client import S3Client
     from snowflake_client import SnowflakeClient
     from utils import create_response, get_correlation_id, get_environment_variable, log_event
     from vault_client import VaultClient
@@ -15,6 +16,7 @@ except ImportError:
     # For local development/testing
     from .aurora_client import AuroraClient
     from .replication import ReplicationEngine
+    from .s3_client import S3Client
     from .snowflake_client import SnowflakeClient
     from .utils import create_response, get_correlation_id, get_environment_variable, log_event
     from .vault_client import VaultClient
@@ -97,11 +99,30 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         log_event('INFO', f'Starting replication: {schema_name}.{table_name}', 
                  correlation_id, mode=replication_mode)
 
+        # Initialize S3 client if S3 staging is enabled
+        s3_bucket = os.getenv('S3_STAGE_BUCKET', '')
+        s3_prefix = os.getenv('S3_STAGE_PREFIX', 'staging')
+        s3_file_format = os.getenv('S3_FILE_FORMAT', 'csv')
+        use_s3_staging = bool(s3_bucket)
+
+        s3_client = None
+        if use_s3_staging:
+            log_event('INFO', f'Using S3 staging: s3://{s3_bucket}/{s3_prefix}', correlation_id)
+            s3_client = S3Client(
+                bucket_name=s3_bucket,
+                prefix=s3_prefix,
+                file_format=s3_file_format
+            )
+
         # Initialize clients and perform replication
         with AuroraClient(aurora_connection_params) as aurora_client, \
              SnowflakeClient(snowflake_connection_params) as snowflake_client:
             
-            replication_engine = ReplicationEngine(aurora_client, snowflake_client)
+            replication_engine = ReplicationEngine(
+                aurora_client, 
+                snowflake_client,
+                s3_client=s3_client
+            )
             
             result = replication_engine.replicate_table(
                 schema_name=schema_name,

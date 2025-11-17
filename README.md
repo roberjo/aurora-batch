@@ -266,6 +266,29 @@ aws lambda invoke \
 - Uses `last_value` from event or previous run
 - Best for: Large tables, frequent updates, cost optimization
 
+### S3 Staging (Recommended for Large Datasets)
+
+The system uses S3 as an external stage for Snowflake data loading:
+
+1. **Extract**: Data extracted from Aurora in batches
+2. **Stage**: Batches uploaded to S3 as CSV or Parquet files
+3. **Load**: Snowflake COPY INTO loads from S3
+4. **Cleanup**: Files cleaned after all batches load successfully (configurable)
+
+**Benefits:**
+- Faster loading for large datasets
+- More cost-effective than direct INSERT
+- Better error handling and retry capabilities
+- Handles very large datasets efficiently
+
+**Cleanup Strategy:**
+- Files are cleaned **after all batches load successfully** (not after each batch)
+- This ensures COPY INTO can load files in parallel
+- Lifecycle policies provide safety net for any missed files
+- Optional cleanup Lambda for orphaned files
+
+See [S3 Staging Documentation](docs/S3_STAGING.md) and [S3 Lifecycle Management](docs/S3_LIFECYCLE_MANAGEMENT.md) for details.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
@@ -628,6 +651,12 @@ MIT License - see LICENSE file for details
   - Schema mapping
   - Error handling
   - Custom monitoring
+- **[Project Review](docs/REVIEW_SUMMARY.md)**: Review summary and recommendations
+- **[Gaps and Improvements](docs/GAPS_AND_IMPROVEMENTS.md)**: Detailed gap analysis and improvement suggestions
+- **[S3 Staging Guide](docs/S3_STAGING.md)**: S3 staging architecture and configuration
+- **[S3 Lifecycle Management](docs/S3_LIFECYCLE_MANAGEMENT.md)**: S3 cleanup strategies and bucket maintenance
+- **[Architecture Documentation](docs/ARCHITECTURE.md)**: Complete solution architecture documentation
+- **[Architecture Diagrams](docs/ARCHITECTURE_DIAGRAMS.md)**: Detailed architecture diagrams
 
 ## Support
 
