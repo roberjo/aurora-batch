@@ -1,0 +1,34 @@
+[MASTER]
+ignore=CVS
+ignore-patterns=test_.*\.py
+
+[MESSAGES CONTROL]
+disable=
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring
+    C0116,  # missing-function-or-method-docstring
+    R0903,  # too-few-public-methods
+    R0913,  # too-many-arguments
+
+[FORMAT]
+max-line-length=127
+indent-string='    '
+
+[BASIC]
+good-names=i,j,k,ex,Run,_,id,db,pk
+
+[DESIGN]
+max-args=7
+max-attributes=12
+max-branches=15
+max-locals=20
+max-statements=50
+
+[TYPECHECK]
+ignored-modules=
+    psycopg2,
+    snowflake.connector,
+    hvac,
+    boto3,
+    botocore
+

@@ -1,0 +1,260 @@
+pipeline:
+  name: Aurora Snowflake Replication Deployment
+  identifier: aurora_snowflake_replication
+  description: Deploy Aurora to Snowflake replication Lambda function
+  
+  projectIdentifier: default
+  orgIdentifier: default
+  
+  tags: {}
+  
+  stages:
+    - stage:
+        name: Deploy Infrastructure
+        identifier: deploy_infrastructure
+        description: Deploy Terraform infrastructure via Terraform Cloud
+        type: Custom
+        
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Deploy Terraform
+                  identifier: deploy_terraform
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          set -e
+                          
+                          # Get Terraform Cloud credentials from Harness secrets
+                          TF_CLOUD_TOKEN=$(echo $TF_CLOUD_TOKEN_SECRET | base64 -d)
+                          TF_CLOUD_ORG=$TF_CLOUD_ORG
+                          TF_CLOUD_WORKSPACE=$TF_CLOUD_WORKSPACE
+                          
+                          # Install Terraform
+                          wget -q https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+                          unzip -q terraform_1.6.0_linux_amd64.zip
+                          chmod +x terraform
+                          sudo mv terraform /usr/local/bin/
+                          
+                          # Configure Terraform Cloud backend
+                          cd terraform
+                          terraform init \
+                            -backend-config="token=$TF_CLOUD_TOKEN" \
+                            -backend-config="organization=$TF_CLOUD_ORG" \
+                            -backend-config="workspace=$TF_CLOUD_WORKSPACE"
+                          
+                          # Run Terraform plan and apply
+                          terraform plan -out=tfplan
+                          terraform apply -auto-approve tfplan
+                          
+                          # Output Lambda function name for next stage
+                          echo "LAMBDA_FUNCTION_NAME=$(terraform output -raw lambda_function_name)" >> $HARNESS_STAGE_OUTPUT_PATH
+                    environmentVariables:
+                      - name: TF_CLOUD_TOKEN_SECRET
+                        type: Secret
+                        value: <+secrets.getValue("terraform_cloud_token")>
+                      - name: TF_CLOUD_ORG
+                        type: Text
+                        value: <+input.terraform_cloud_org>
+                      - name: TF_CLOUD_WORKSPACE
+                        type: Text
+                        value: <+input.terraform_cloud_workspace>
+                  timeout: 10m
+                  
+              - step:
+                  type: ShellScript
+                  name: Verify Infrastructure
+                  identifier: verify_infrastructure
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          # Verify Lambda function exists
+                          aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME || exit 1
+                          echo "Infrastructure deployment verified"
+                    environmentVariables:
+                      - name: LAMBDA_FUNCTION_NAME
+                        type: Text
+                        value: <+stage.output.deploy_terraform.LAMBDA_FUNCTION_NAME>
+                  timeout: 2m
+        
+    - stage:
+        name: Deploy Lambda Function
+        identifier: deploy_lambda
+        description: Deploy Lambda function from Artifactory
+        type: Custom
+        
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Download from Artifactory
+                  identifier: download_artifactory
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          set -e
+                          
+                          # Download package from Artifactory
+                          ARTIFACTORY_URL=$ARTIFACTORY_URL
+                          ARTIFACTORY_REPO=$ARTIFACTORY_REPO
+                          ARTIFACTORY_USER=$ARTIFACTORY_USER
+                          ARTIFACTORY_PASSWORD=$ARTIFACTORY_PASSWORD
+                          PACKAGE_NAME=$PACKAGE_NAME
+                          
+                          curl -u "$ARTIFACTORY_USER:$ARTIFACTORY_PASSWORD" \
+                            -X GET \
+                            "${ARTIFACTORY_URL}/${ARTIFACTORY_REPO}/${PACKAGE_NAME}" \
+                            -o lambda-deployment.zip
+                          
+                          echo "Downloaded package: $PACKAGE_NAME"
+                    environmentVariables:
+                      - name: ARTIFACTORY_URL
+                        type: Text
+                        value: <+input.artifactory_url>
+                      - name: ARTIFACTORY_REPO
+                        type: Text
+                        value: <+input.artifactory_repo>
+                      - name: ARTIFACTORY_USER
+                        type: Secret
+                        value: <+secrets.getValue("artifactory_user")>
+                      - name: ARTIFACTORY_PASSWORD
+                        type: Secret
+                        value: <+secrets.getValue("artifactory_password")>
+                      - name: PACKAGE_NAME
+                        type: Text
+                        value: <+input.package_name>
+                  timeout: 5m
+                  
+              - step:
+                  type: ShellScript
+                  name: Update Lambda Function
+                  identifier: update_lambda
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          set -e
+                          
+                          LAMBDA_FUNCTION_NAME=$LAMBDA_FUNCTION_NAME
+                          
+                          # Update Lambda function code
+                          aws lambda update-function-code \
+                            --function-name $LAMBDA_FUNCTION_NAME \
+                            --zip-file fileb://lambda-deployment.zip \
+                            --region $AWS_REGION
+                          
+                          # Wait for update to complete
+                          aws lambda wait function-updated \
+                            --function-name $LAMBDA_FUNCTION_NAME \
+                            --region $AWS_REGION
+                          
+                          echo "Lambda function updated successfully"
+                    environmentVariables:
+                      - name: LAMBDA_FUNCTION_NAME
+                        type: Text
+                        value: <+stage.output.deploy_infrastructure.deploy_terraform.LAMBDA_FUNCTION_NAME>
+                      - name: AWS_REGION
+                        type: Text
+                        value: <+input.aws_region>
+                  timeout: 10m
+        
+    - stage:
+        name: Smoke Tests
+        identifier: smoke_tests
+        description: Run smoke tests to verify deployment
+        type: Custom
+        
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Invoke Lambda Test
+                  identifier: invoke_lambda_test
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          set -e
+                          
+                          LAMBDA_FUNCTION_NAME=$LAMBDA_FUNCTION_NAME
+                          TEST_EVENT='{"schema_name": "public", "table_name": "test_table"}'
+                          
+                          # Invoke Lambda function with test event
+                          RESPONSE=$(aws lambda invoke \
+                            --function-name $LAMBDA_FUNCTION_NAME \
+                            --payload "$TEST_EVENT" \
+                            --region $AWS_REGION \
+                            response.json)
+                          
+                          # Check response
+                          if [ $? -eq 0 ]; then
+                            echo "Lambda invocation successful"
+                            cat response.json
+                          else
+                            echo "Lambda invocation failed"
+                            exit 1
+                          fi
+                    environmentVariables:
+                      - name: LAMBDA_FUNCTION_NAME
+                        type: Text
+                        value: <+stage.output.deploy_infrastructure.deploy_terraform.LAMBDA_FUNCTION_NAME>
+                      - name: AWS_REGION
+                        type: Text
+                        value: <+input.aws_region>
+                  timeout: 5m
+                  
+              - step:
+                  type: ShellScript
+                  name: Verify CloudWatch Logs
+                  identifier: verify_logs
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          set -e
+                          
+                          LOG_GROUP="/aws/lambda/$LAMBDA_FUNCTION_NAME"
+                          
+                          # Check if log group exists and has recent logs
+                          aws logs describe-log-streams \
+                            --log-group-name $LOG_GROUP \
+                            --order-by LastEventTime \
+                            --descending \
+                            --max-items 1 \
+                            --region $AWS_REGION || echo "No logs found (this may be expected for first run)"
+                          
+                          echo "Log verification completed"
+                    environmentVariables:
+                      - name: LAMBDA_FUNCTION_NAME
+                        type: Text
+                        value: <+stage.output.deploy_infrastructure.deploy_terraform.LAMBDA_FUNCTION_NAME>
+                      - name: AWS_REGION
+                        type: Text
+                        value: <+input.aws_region>
+                  timeout: 2m
+
